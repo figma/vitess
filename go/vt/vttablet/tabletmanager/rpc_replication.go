@@ -536,6 +536,21 @@ func (tm *TabletManager) setMasterLocked(ctx context.Context, parentAlias *topod
 		}
 	}
 
+	// If semi-sync is enabled, ensure that the new MASTER does not need to to
+	// scan the entire binlog to make the first connection since that can be very
+	// expensive.
+	// Discussed in this issue: https://github.com/vitessio/vitess/issues/4161
+	if tablet.Type == topodatapb.TabletType_REPLICA {
+		_, replicaEnabled := tm.MysqlDaemon.SemiSyncEnabled()
+		if replicaEnabled {
+			// Perform the flush on a best effort bassis to ensure that a reparent
+			// operation is never prevented due to not being able to flush.
+			if err := tm.MysqlDaemon.ExecuteSuperQueryList(ctx, []string{"flush binary logs"}); err != nil {
+				log.Warningf("setMasterLocked failed to flush binary logs: %v", err)
+			}
+		}
+	}
+
 	// See if we were replicating at all, and should be replicating.
 	wasReplicating := false
 	shouldbeReplicating := false
